@@ -1,0 +1,19 @@
+[project]
+name = "portainer-cli"
+version = "0.1.0"
+description = "Minimal CLI for Portainer container management"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "httpx>=0.24",
+]
+
+[project.scripts]
+portainer-cli = "portainer_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
