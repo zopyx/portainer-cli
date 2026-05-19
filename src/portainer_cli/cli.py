@@ -1,8 +1,9 @@
 import sys
+
 import click
 
-from .config import load_config, get_config_path, Config, CONFIG_DIR
 from .client import PortainerClient, PortainerError
+from .config import Config, get_config_path, load_config
 
 
 def _get_client(ctx) -> PortainerClient:
@@ -57,7 +58,7 @@ def stack():
 @click.pass_context
 def list(ctx):
     """List all stacks"""
-    cfg = _require_config(ctx)
+    _require_config(ctx)
     client = _get_client(ctx)
     try:
         stacks = client.get_stacks()
@@ -70,6 +71,66 @@ def list(ctx):
         raise click.Abort() from e
 
 
+def _redeploy(ctx, name, repull):
+    _require_config(ctx)
+    client = _get_client(ctx)
+
+    stack = _resolve_stack(client, name)
+    if stack is None:
+        raise click.Abort()
+
+    try:
+        msg = client.redeploy_stack(stack["Name"], repull=repull)
+        click.echo(msg)
+    except PortainerError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort() from e
+
+
+def _resolve_stack(client, name):
+    try:
+        return client.get_stack_by_name(name)
+    except PortainerError:
+        pass
+
+    matches = client.find_stacks(name)
+    if not matches:
+        try:
+            client.get_stack_by_name(name)
+        except PortainerError as e:
+            click.echo(f"Error: {e}", err=True)
+        return None
+
+    click.echo(f"Stack '{name}' not found. Did you mean:", err=True)
+    for i, s in enumerate(matches, 1):
+        click.echo(f"  {i}. {s['Name']}", err=True)
+
+    choice = click.prompt(
+        f"Enter number (1-{len(matches)}) or stack name, or leave empty to cancel",
+        default="",
+        show_default=False,
+        err=True,
+    )
+    if not choice.strip():
+        return None
+
+    try:
+        idx = int(choice)
+        if 1 <= idx <= len(matches):
+            return matches[idx - 1]
+        click.echo("Invalid selection", err=True)
+        return None
+    except ValueError:
+        pass
+
+    choice_clean = choice.strip()
+    for s in matches:
+        if s["Name"] == choice_clean:
+            return s
+    click.echo(f"'{choice_clean}' does not match any suggested stack", err=True)
+    return None
+
+
 @stack.command(name="pull-and-redeploy")
 @click.argument("name")
 @click.option(
@@ -80,14 +141,20 @@ def list(ctx):
 @click.pass_context
 def pull_and_redeploy(ctx, name, repull):
     """Pull latest images and redeploy a stack by NAME"""
-    _require_config(ctx)
-    client = _get_client(ctx)
-    try:
-        msg = client.redeploy_stack(name, repull=repull)
-        click.echo(msg)
-    except PortainerError as e:
-        click.echo(f"Error: {e}", err=True)
-        raise click.Abort() from e
+    _redeploy(ctx, name, repull)
+
+
+@stack.command(name="redeploy")
+@click.argument("name")
+@click.option(
+    "--repull/--no-repull",
+    default=True,
+    help="Repull images and redeploy (default: repull)",
+)
+@click.pass_context
+def redeploy(ctx, name, repull):
+    """Alias for pull-and-redeploy"""
+    _redeploy(ctx, name, repull)
 
 
 @cli.group()
@@ -129,9 +196,7 @@ def status(ctx, name, env_name):
     type=int,
     help="Number of recent log lines (default: 100)",
 )
-@click.option(
-    "--follow", "-f", is_flag=True, help="Follow log output (tail -f style)"
-)
+@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f style)")
 @click.pass_context
 def logs(ctx, name, env_name, tail, follow):
     """Fetch or stream logs for a service by NAME"""
@@ -185,22 +250,16 @@ def init(force):
     """Create configuration interactively"""
     path = get_config_path()
     if path.exists() and not force:
-        click.confirm(
-            f"Config exists at {path}. Overwrite?", abort=True, err=True
-        )
+        click.confirm(f"Config exists at {path}. Overwrite?", abort=True, err=True)
 
     click.echo("Portainer CLI Configuration")
     click.echo("---")
     url = click.prompt("Portainer URL", type=str)
     api_key = click.prompt("API Key", type=str, hide_input=True)
-    env = click.prompt(
-        "Default environment name", type=str, default="primary"
-    )
+    env = click.prompt("Default environment name", type=str, default="primary")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f'url = "{url}"\napi_key = "{api_key}"\nenvironment = "{env}"\n'
-    )
+    path.write_text(f'url = "{url}"\napi_key = "{api_key}"\nenvironment = "{env}"\n')
     path.chmod(0o600)
     click.echo(f"Config written to {path}")
 

@@ -1,6 +1,5 @@
 import struct
-import sys
-import time
+
 import httpx
 
 
@@ -92,8 +91,6 @@ class PortainerClient:
             stype = type_names.get(s.get("Type", 0), "?")
             status = status_names.get(s.get("Status", 0), "?")
             ep = s.get("EndpointId", "?")
-            created = s.get("CreationDate", 0)
-            updated = s.get("UpdateDate", 0)
 
             git = ""
             gc = s.get("GitConfig") or {}
@@ -111,8 +108,20 @@ class PortainerClient:
         for s in stacks:
             if s.get("Name") == name:
                 return s
-        names = [s.get("Name", "?") for s in stacks]
-        raise PortainerError(f"Stack '{name}' not found. Available: {', '.join(names)}")
+        raise PortainerError(f"Stack '{name}' not found")
+
+    def find_stacks(self, search: str) -> list[dict]:
+        r = self._req("GET", "/api/stacks")
+        stacks = r.json()
+        search_lower = search.lower()
+        matches = [s for s in stacks if search_lower in s.get("Name", "").lower()]
+        matches.sort(
+            key=lambda s: (
+                0 if s["Name"].lower().startswith(search_lower) else 1,
+                s["Name"],
+            )
+        )
+        return matches
 
     def redeploy_stack(self, name: str, repull: bool = True) -> str:
         stack = self.get_stack_by_name(name)
@@ -173,7 +182,9 @@ class PortainerClient:
         )
         services = r.json()
         if not services:
-            raise PortainerError(f"Service '{name}' not found in environment {endpoint_id}")
+            raise PortainerError(
+                f"Service '{name}' not found in environment {endpoint_id}"
+            )
         return services[0]
 
     def format_service_status(self, service: dict) -> str:
@@ -270,10 +281,14 @@ class PortainerClient:
         if tail is not None:
             params["tail"] = str(tail)
 
-        url = f"{self.base}/api/endpoints/{endpoint_id}/docker/services/{service_id}/logs"
+        url = (
+            f"{self.base}/api/endpoints/{endpoint_id}/docker/services/{service_id}/logs"
+        )
         parser = LogStreamParser()
         try:
-            with self.client.stream("GET", url, params=params) as r:
+            with self.client.stream(
+                "GET", url, params=params, timeout=httpx.Timeout(None)
+            ) as r:
                 if r.status_code != 200:
                     raise PortainerError(
                         f"Log stream failed ({r.status_code}): {r.text[:200]}",
@@ -289,6 +304,8 @@ class PortainerClient:
                         except Exception:
                             text = repr(data)
                         yield stype, text
+        except httpx.ReadTimeout:
+            pass
         except KeyboardInterrupt:
             pass
         finally:
