@@ -221,9 +221,7 @@ def logs(ctx, name, env_name, tail, follow):
 
     try:
         if follow:
-            for stype, line in client.fetch_logs(eid, sid, tail=tail):
-                _write_log_line(stype, line)
-            for stype, line in client.stream_logs(eid, sid, tail=0):
+            for stype, line in client.stream_logs(eid, sid, tail=tail):
                 _write_log_line(stype, line)
         else:
             lines = client.fetch_logs(eid, sid, tail=tail)
