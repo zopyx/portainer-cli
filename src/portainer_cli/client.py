@@ -270,7 +270,6 @@ class PortainerClient:
         self,
         endpoint_id: int,
         service_id: str,
-        tail: int | None = None,
     ):
         params = {
             "stdout": "true",
@@ -278,8 +277,6 @@ class PortainerClient:
             "timestamps": "true",
             "follow": "true",
         }
-        if tail is not None:
-            params["tail"] = str(tail)
 
         url = (
             f"{self.base}/api/endpoints/{endpoint_id}/docker/services/{service_id}/logs"
